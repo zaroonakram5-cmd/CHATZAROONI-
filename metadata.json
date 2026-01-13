@@ -1,0 +1,8 @@
+{
+  "name": "CHATZAROONI - Unbound Python AI",
+  "description": "The ultimate unfiltered AI assistant specializing in Python, real-time voice, and creative generation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
