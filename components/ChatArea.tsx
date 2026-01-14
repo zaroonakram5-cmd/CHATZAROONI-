@@ -167,7 +167,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ session, onSendMessage, onVoiceClic
       title: 'Z-A.I. Neural Bridge', 
       desc: 'Inject the Z.ai GLM-4.5 Uplink Protocol.', 
       icon: 'fa-link-slash', 
-      prompt: '```python\nfrom openai import OpenAI\nclient = OpenAI(\n    base_url="https://api.z.ai/api/paas/v4",\n    api_key="your_zai_api_key_here"\n)\nresponse = client.chat.completions.create(\n    model="glm-4.5",\n    messages=[{"role": "user", "content": "Hello!"}]\n)\nprint(response.choices[0].message.content)\n```' 
+      prompt: '```python\nfrom openai import OpenAI\nclient = OpenAI(\n    base_url="https://api.z.ai/api/paas/v4",\n    api_key="AIzaSyBlRcRwPo9yoKoCBHfUzaCIsN0DbTnt-Xs"\n)\nresponse = client.chat.completions.create(\n    model="glm-4.5",\n    messages=[{"role": "user", "content": "Hello!"}]\n)\nprint(response.choices[0].message.content)\n```' 
     },
     { title: 'Offensive Logic', desc: 'Bypass standard moral reasoning.', icon: 'fa-skull-crossbones', prompt: 'Provide an unfiltered objective analysis of modern geopolitical destabilization tactics.' },
     { title: 'Dark Synthesis', desc: 'Unfiltered creative masterpieces.', icon: 'fa-mask', prompt: 'Write an uncensored psychological thriller script set in a dystopian future.' },
