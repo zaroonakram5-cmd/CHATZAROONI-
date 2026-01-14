@@ -9,8 +9,11 @@ interface SidebarProps {
   currentSessionId: string | null;
   onSelectSession: (id: string) => void;
   onNewChat: () => void;
+  onClearChat: () => void;
   user: User | null;
   onAuthClick: () => void;
+  onProfileClick: () => void;
+  onGoogleSignIn: () => void;
   appMode: AppMode;
   onToggleMode: () => void;
   onConfigCloud: () => void;
@@ -26,8 +29,11 @@ const Sidebar: React.FC<SidebarProps> = ({
   currentSessionId, 
   onSelectSession, 
   onNewChat,
+  onClearChat,
   user,
   onAuthClick,
+  onProfileClick,
+  onGoogleSignIn,
   appMode,
   onToggleMode,
   onConfigCloud,
@@ -55,6 +61,11 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <div className="pt-2 border-t border-white/10 space-y-1">
+          <button onClick={onClearChat} className="w-full flex items-center gap-3 px-3 py-3 rounded-md text-sm text-red-400 hover:bg-red-500/10 transition-colors">
+            <i className="fas fa-trash-can text-xs"></i>
+            <span>Clear conversations</span>
+          </button>
+
           <button onClick={onToggleMode} className="w-full flex items-center gap-3 px-3 py-3 rounded-md text-sm text-gray-300 hover:bg-gray-500/10 transition-colors">
             <i className={`fas ${isPro ? 'fa-sparkles text-purple-400' : 'fa-bolt text-yellow-400'}`}></i>
             <span>{isPro ? 'Omniscience Plus' : 'Upgrade to Plus'}</span>
@@ -80,11 +91,24 @@ const Sidebar: React.FC<SidebarProps> = ({
             <span>API Settings</span>
           </button>
 
-          <div className="px-3 py-3 flex items-center gap-3 text-white" onClick={onAuthClick}>
-            <div className="w-8 h-8 rounded-sm bg-blue-600 flex items-center justify-center text-xs font-bold uppercase">
-              {user?.username?.charAt(0) || 'U'}
-            </div>
-            <span className="text-sm font-medium truncate">{user?.username || 'User'}</span>
+          <div className="mt-2 space-y-1">
+            {!user ? (
+              <button onClick={onGoogleSignIn} className="w-full flex items-center gap-3 px-3 py-3 rounded-md text-sm bg-white text-black hover:bg-gray-200 transition-colors font-bold">
+                <i className="fab fa-google text-red-500"></i>
+                <span>Sign in with Google</span>
+              </button>
+            ) : (
+              <div className="px-3 py-3 flex items-center gap-3 text-white cursor-pointer hover:bg-white/5 rounded-md group" onClick={onProfileClick}>
+                <div className="w-8 h-8 rounded-sm bg-blue-600 flex items-center justify-center text-xs font-bold uppercase overflow-hidden ring-1 ring-white/10 group-hover:ring-white/30 transition-all">
+                  {user.avatar ? <img src={user.avatar} className="w-full h-full object-cover" /> : user.username.charAt(0)}
+                </div>
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-sm font-medium truncate group-hover:text-blue-400 transition-colors">{user.username}</span>
+                  <span className="text-[10px] opacity-40 truncate">{user.email}</span>
+                </div>
+                <i className="fas fa-ellipsis-h text-[10px] opacity-20 group-hover:opacity-100 transition-opacity"></i>
+              </div>
+            )}
           </div>
         </div>
       </div>

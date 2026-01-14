@@ -6,6 +6,7 @@ import ChatArea from './components/ChatArea';
 import VoiceInterface from './components/VoiceInterface';
 import AuthModal from './components/AuthModal';
 import PersonaModal from './components/PersonaModal';
+import ProfileModal from './components/ProfileModal';
 import { Message, ChatSession, User, AppMode, GenerationOptions } from './types';
 import { gemini } from './services/geminiService';
 
@@ -17,6 +18,7 @@ const App: React.FC = () => {
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isPersonaModalOpen, setIsPersonaModalOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isDevMode, setIsDevMode] = useState(false);
   const [appMode, setAppMode] = useState<AppMode>(AppMode.Pro);
   const [customPersona, setCustomPersona] = useState<string>("");
@@ -59,6 +61,37 @@ const App: React.FC = () => {
     const newSession: ChatSession = { id: uuidv4(), title: '', messages: [], createdAt: Date.now() };
     setSessions(prev => [newSession, ...prev]);
     setCurrentSessionId(newSession.id);
+  };
+
+  const clearAllSessions = () => {
+    if (window.confirm("Terminate all protocol sessions? This cannot be undone.")) {
+      setSessions([]);
+      createNewSession();
+      localStorage.removeItem('chatzarooni_sessions');
+    }
+  };
+
+  const handleGoogleSignIn = () => {
+    const mockUser: User = {
+      id: 'google-' + Math.random().toString(36).substr(2, 9),
+      username: 'Protocol Pilot',
+      email: 'pilot@zaroon.ai',
+      isPro: true,
+      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=pilot'
+    };
+    setUser(mockUser);
+    localStorage.setItem('chatzarooni_user', JSON.stringify(mockUser));
+  };
+
+  const handleUpdateUser = (updatedUser: User) => {
+    setUser(updatedUser);
+    localStorage.setItem('chatzarooni_user', JSON.stringify(updatedUser));
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    localStorage.removeItem('chatzarooni_user');
+    setIsProfileModalOpen(false);
   };
 
   const currentSession = sessions.find(s => s.id === currentSessionId);
@@ -154,7 +187,11 @@ const App: React.FC = () => {
         isOpen={isSidebarOpen} toggle={() => setIsSidebarOpen(!isSidebarOpen)}
         sessions={sessions} currentSessionId={currentSessionId}
         onSelectSession={setCurrentSessionId} onNewChat={createNewSession}
-        user={user} onAuthClick={() => setIsAuthModalOpen(true)}
+        onClearChat={clearAllSessions}
+        user={user} 
+        onAuthClick={() => setIsAuthModalOpen(true)}
+        onProfileClick={() => setIsProfileModalOpen(true)}
+        onGoogleSignIn={handleGoogleSignIn}
         appMode={appMode} onToggleMode={() => setAppMode(prev => prev === AppMode.Standard ? AppMode.Pro : AppMode.Standard)}
         onConfigCloud={handleConfigCloud} onPersonaClick={() => setIsPersonaModalOpen(true)}
         isDevMode={isDevMode} onToggleDev={() => setIsDevMode(!isDevMode)}
@@ -165,6 +202,14 @@ const App: React.FC = () => {
       {isVoiceActive && <VoiceInterface onClose={() => setIsVoiceActive(false)} isPro={appMode === AppMode.Pro} />}
       {isAuthModalOpen && <AuthModal onClose={() => setIsAuthModalOpen(false)} onLogin={(u) => { setUser(u); localStorage.setItem('chatzarooni_user', JSON.stringify(u)); setIsAuthModalOpen(false); }} />}
       {isPersonaModalOpen && <PersonaModal initialInstruction={customPersona} onSave={(instr) => { setCustomPersona(instr); setIsPersonaModalOpen(false); }} onClose={() => setIsPersonaModalOpen(false)} />}
+      {isProfileModalOpen && user && (
+        <ProfileModal 
+          user={user} 
+          onSave={handleUpdateUser} 
+          onLogout={handleLogout}
+          onClose={() => setIsProfileModalOpen(false)} 
+        />
+      )}
     </div>
   );
 };

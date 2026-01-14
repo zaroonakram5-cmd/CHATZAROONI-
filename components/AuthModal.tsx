@@ -26,6 +26,17 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLogin }) => {
     onLogin(newUser);
   };
 
+  const handleGoogleMock = () => {
+    const newUser: User = {
+      id: 'google-' + Math.random().toString(36).substr(2, 9),
+      username: 'Protocol Pilot',
+      email: 'pilot@zaroon.ai',
+      isPro: true,
+      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=pilot`
+    };
+    onLogin(newUser);
+  };
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/90 backdrop-blur-xl" onClick={onClose}></div>
@@ -38,7 +49,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLogin }) => {
           <p className="text-gray-500 text-sm mt-2 font-mono uppercase tracking-widest">Chatzarooni Link Protocol</p>
         </div>
         
-        <form onSubmit={handleSubmit} className="space-y-8">
+        <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest px-1">alias_handle</label>
             <input 
@@ -69,6 +80,20 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLogin }) => {
             Authenticate Link
           </button>
         </form>
+
+        <div className="my-6 flex items-center gap-4">
+          <div className="flex-1 h-px bg-white/10"></div>
+          <span className="text-[9px] font-black uppercase text-gray-600 tracking-widest">OR</span>
+          <div className="flex-1 h-px bg-white/10"></div>
+        </div>
+
+        <button 
+          onClick={handleGoogleMock}
+          className="w-full py-4 bg-white text-black hover:bg-gray-200 rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-3"
+        >
+          <i className="fab fa-google text-red-500"></i>
+          Continue with Google
+        </button>
 
         <div className="mt-10 flex flex-col items-center gap-4">
           <div className="flex gap-2">
