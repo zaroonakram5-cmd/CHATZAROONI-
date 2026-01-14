@@ -8,133 +8,70 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Inter:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@300;400;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@300;400;700&display=swap');
         
         :root {
-            --ultra-bg: #020202;
-            --ultra-accent: #ff003c;
-            --ultra-glow: rgba(255, 0, 60, 0.4);
-            --ultra-gradient: linear-gradient(135deg, #ff003c 0%, #7000ff 50%, #00d4ff 100%);
+            --bg-primary: #ffffff;
+            --bg-secondary: #f9f9fb;
+            --text-primary: #1a1a1b;
+            --text-secondary: #6e6e80;
+            --accent: #10a37f; /* Standard Chat UI Green */
+            --pro-accent: #7d40ff; /* Pro Blue/Purple */
+            --border: #e5e5e7;
         }
 
         body { 
             font-family: 'Inter', sans-serif; 
-            background-color: #131314;
-            color: #e3e3e3;
-            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            transition: background-color 0.3s ease;
             overflow: hidden;
         }
 
         body.pro-active {
-            background-color: var(--ultra-bg);
-            cursor: crosshair;
+            --bg-primary: #050509;
+            --bg-secondary: #0f0f13;
+            --text-primary: #ececf1;
+            --text-secondary: #acacbe;
+            --border: #2d2d31;
         }
 
         .mono { font-family: 'JetBrains Mono', monospace; }
 
-        /* Ultra Scrollbar */
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        /* Clean Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
-        .pro-active ::-webkit-scrollbar-thumb { background: var(--ultra-accent); box-shadow: 0 0 10px var(--ultra-glow); }
+        ::-webkit-scrollbar-thumb { background: #d1d1d1; border-radius: 10px; }
+        .pro-active ::-webkit-scrollbar-thumb { background: #444654; }
 
         .ultra-text-gradient {
-            background: var(--ultra-gradient);
+            background: linear-gradient(135deg, #7d40ff 0%, #00d4ff 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            background-size: 200% auto;
-            animation: textShine 4s linear infinite;
         }
 
-        @keyframes textShine {
-            to { background-position: 200% center; }
+        .chat-input-container {
+            box-shadow: 0 0 20px rgba(0,0,0,0.05);
+            border: 1px solid var(--border);
         }
 
-        /* Background Effects */
-        .bg-grid {
-            background-image: linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-                              linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-            background-size: 50px 50px;
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            pointer-events: none;
-            z-index: 1;
+        .pro-active .chat-input-container {
+            box-shadow: 0 0 30px rgba(0,0,0,0.4);
         }
 
-        .pro-active .bg-grid {
-            background-image: linear-gradient(rgba(255, 0, 60, 0.05) 1px, transparent 1px),
-                              linear-gradient(90deg, rgba(255, 0, 60, 0.05) 1px, transparent 1px);
-            background-size: 40px 40px;
-        }
-
-        .neural-bg {
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            pointer-events: none;
-            z-index: 0;
-            opacity: 0;
-            transition: opacity 2s ease;
-        }
-
-        .pro-active .neural-bg {
-            opacity: 0.15;
-            background: radial-gradient(circle at 50% 50%, #ff003c 0%, transparent 70%);
-            mix-blend-mode: color-dodge;
-        }
-
-        /* Scanlines */
-        .scanline {
+        /* Message Styling */
+        .message-bubble {
+            max-width: 850px;
+            margin: 0 auto;
             width: 100%;
-            height: 4px;
-            z-index: 100;
-            background: rgba(255, 255, 255, 0.05);
-            opacity: 0.1;
-            position: absolute;
-            top: -10px;
-            pointer-events: none;
-            animation: scanline 8s linear infinite;
         }
 
-        .pro-active .scanline {
-            background: rgba(255, 0, 60, 0.1);
-            animation: scanline 4s linear infinite;
+        .user-message {
+            background-color: var(--bg-secondary);
         }
 
-        @keyframes scanline {
-            0% { top: -10px; }
-            100% { top: 100%; }
-        }
-
-        /* Glitch Effect */
-        .glitch-hover:hover {
-            animation: glitch 0.3s cubic-bezier(.25,.46,.45,.94) both infinite;
-        }
-
-        @keyframes glitch {
-            0% { transform: translate(0); }
-            20% { transform: translate(-2px, 2px); }
-            40% { transform: translate(-2px, -2px); }
-            60% { transform: translate(2px, 2px); }
-            80% { transform: translate(2px, -2px); }
-            100% { transform: translate(0); }
-        }
-
-        .ultra-card {
-            background: rgba(255, 255, 255, 0.03);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            transition: all 0.3s ease;
-        }
-
-        .pro-active .ultra-card {
-            background: rgba(255, 0, 60, 0.02);
-            border: 1px solid rgba(255, 0, 60, 0.1);
-            box-shadow: 0 0 30px rgba(255, 0, 60, 0.05);
-        }
-
-        .pro-active .ultra-card:hover {
-            border-color: rgba(255, 0, 60, 0.4);
-            box-shadow: 0 0 50px rgba(255, 0, 60, 0.15);
+        .assistant-message {
+            background-color: transparent;
         }
     </style>
 <script type="importmap">
@@ -152,9 +89,6 @@
 <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
 </head>
 <body class="overflow-hidden">
-    <div class="bg-grid"></div>
-    <div class="neural-bg"></div>
-    <div class="scanline"></div>
     <div id="root"></div>
     <script type="module" src="./index.tsx"></script>
 </body>

@@ -9,28 +9,19 @@ interface ChatAreaProps {
   onSendMessage: (text: string, type: 'text' | 'image' | 'video', options: GenerationOptions) => void;
   onVoiceClick: () => void;
   appMode: AppMode;
+  isDevMode: boolean;
 }
 
-const ChatArea: React.FC<ChatAreaProps> = ({ session, onSendMessage, onVoiceClick, appMode }) => {
+const ChatArea: React.FC<ChatAreaProps> = ({ session, onSendMessage, onVoiceClick, appMode, isDevMode }) => {
   const [input, setInput] = useState('');
   const [activeType, setActiveType] = useState<'text' | 'image' | 'video'>('text');
-  const [aspectRatio, setAspectRatio] = useState<GenerationOptions['aspectRatio']>("16:9");
-  const [imageSize, setImageSize] = useState<GenerationOptions['imageSize']>("2K");
-  const [useSearch, setUseSearch] = useState(false);
-  const [useMaps, setUseMaps] = useState(false);
+  const [useSearch, setUseSearch] = useState(true);
   const [useThinking, setUseThinking] = useState(true);
-  const [thinkingBudget, setThinkingBudget] = useState(16384);
+  const [videoAspectRatio, setVideoAspectRatio] = useState<'16:9' | '9:16'>('16:9');
+  const [videoResolution, setVideoResolution] = useState<'720p' | '1080p'>('1080p');
   const [fileData, setFileData] = useState<{data: string, mimeType: string} | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState<string | null>(null);
   
-  const [isRecording, setIsRecording] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const [recordTime, setRecordTime] = useState(0);
-  const [injectedCode, setInjectedCode] = useState<string | null>(null);
-
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<number | null>(null);
-
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -43,60 +34,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ session, onSendMessage, onVoiceClic
     }
   }, [session?.messages]);
 
-  useEffect(() => {
-    if (isRecording) {
-      timerRef.current = window.setInterval(() => {
-        setRecordTime(prev => prev + 1);
-      }, 1000);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-      setRecordTime(0);
-    }
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [isRecording]);
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-      audioChunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        setIsTranscribing(true);
-        try {
-          const reader = new FileReader();
-          reader.readAsDataURL(audioBlob);
-          reader.onloadend = async () => {
-            const base64Audio = (reader.result as string).split(',')[1];
-            const text = await gemini.transcribeAudio(base64Audio, 'audio/webm');
-            if (text) setInput(prev => prev ? `${prev} ${text}` : text);
-            setIsTranscribing(false);
-          };
-        } catch (err) {
-          console.error("Transcription error:", err);
-          setIsTranscribing(false);
-        }
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      recorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      console.error("Mic access denied:", err);
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
+  const getActiveEngine = () => {
+    if (activeType === 'text') return isPro ? 'GEMINI 3 PRO UNBOUND' : 'GEMINI 3 FLASH';
+    if (activeType === 'image') return isPro ? 'GEMINI 3 PRO IMAGE' : 'GEMINI 2.5 FLASH IMAGE';
+    if (activeType === 'video') return isPro ? 'VEO 3.1 CINEMATIC' : 'VEO 3.1 FAST';
+    return 'UNBOUND CORE';
   };
 
   const handleSubmit = (e?: React.FormEvent, customPrompt?: string) => {
@@ -105,13 +47,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ session, onSendMessage, onVoiceClic
     if (!finalInput.trim() && !fileData) return;
     
     const options: GenerationOptions = {
-      aspectRatio,
-      imageSize,
-      useSearch,
-      useMaps,
+      useSearch: useSearch || isPro,
       useThinking: useThinking || isPro,
-      thinkingBudget: isPro ? thinkingBudget : undefined,
-      fileData: fileData || undefined
+      fileData: fileData || undefined,
+      aspectRatio: activeType === 'video' ? videoAspectRatio : "1:1",
+      resolution: activeType === 'video' ? videoResolution : undefined
     };
 
     onSendMessage(finalInput, activeType, options);
@@ -120,132 +60,139 @@ const ChatArea: React.FC<ChatAreaProps> = ({ session, onSendMessage, onVoiceClic
     if (inputRef.current) inputRef.current.style.height = 'auto';
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setFileData({
-          data: event.target?.result as string,
-          mimeType: file.type
-        });
-      };
-      reader.readAsDataURL(file);
-    }
+  const speakText = async (id: string, text: string) => {
+    setIsSpeaking(id);
+    try {
+      const base64 = await gemini.generateSpeech(text);
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      const binaryString = atob(base64);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+      const dataInt16 = new Int16Array(bytes.buffer);
+      const buffer = ctx.createBuffer(1, dataInt16.length, 24000);
+      const channelData = buffer.getChannelData(0);
+      for (let i = 0; i < dataInt16.length; i++) channelData[i] = dataInt16[i] / 32768.0;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.onended = () => setIsSpeaking(null);
+      source.start();
+    } catch (err) { console.error(err); setIsSpeaking(null); }
   };
 
-  const renderContent = (content: string) => {
-    if (!content) return null;
+  const renderContent = (m: Message) => {
+    if (m.type === 'image' && m.mediaUrl) {
+      return (
+        <div className="my-4 rounded-xl overflow-hidden border border-inherit shadow-lg group relative">
+          <img src={m.mediaUrl} alt="Generated" className="w-full h-auto max-h-[600px] object-cover" />
+          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <a href={m.mediaUrl} download="generated.png" className="bg-black/60 text-white p-2 rounded-lg hover:bg-black/80"><i className="fas fa-download"></i></a>
+          </div>
+        </div>
+      );
+    }
+    if (m.type === 'video' && m.mediaUrl) {
+      return (
+        <div className="my-4 rounded-xl overflow-hidden border border-inherit shadow-lg bg-black relative"><video src={m.mediaUrl} controls className="w-full h-auto max-h-[600px]" /></div>
+      );
+    }
+
+    const content = m.content;
+    if (!content) return m.isStreaming ? <div className="flex gap-1 items-center py-2"><div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></div><div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-100"></div><div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-200"></div></div> : null;
+    
     const parts = content.split(/(```python[\s\S]*?```)/g);
     return parts.map((part, index) => {
       if (part.startsWith('```python') && part.endsWith('```')) {
         const code = part.replace(/^```python\n?/, '').replace(/\n?```$/, '');
-        return (
-          <div key={index} className="relative group/code my-10">
-            <PythonEditor initialCode={code} overrideCode={injectedCode} onCodeConsumed={() => setInjectedCode(null)} />
-            <button 
-              onClick={() => setInjectedCode(code)}
-              className="absolute top-6 right-8 bg-black/60 hover:bg-red-600 px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border border-red-600/30 opacity-0 group-hover/code:opacity-100 transition-all text-red-500 hover:text-white"
-            >
-              Inject Buffer
-            </button>
-          </div>
-        );
+        return <div key={index} className="my-6"><PythonEditor initialCode={code} /></div>;
       }
-      return <div key={index} className={`whitespace-pre-wrap message-content mb-4 font-medium leading-relaxed ${isPro ? 'text-[18px] selection:bg-red-600/50' : 'text-[17px] selection:bg-blue-600/30'}`}>{part}</div>;
+      return <div key={index} className="whitespace-pre-wrap leading-relaxed text-md mb-4">{part}</div>;
     });
   };
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  const getActiveModalityColor = () => {
+    if (activeType === 'text') return 'text-blue-500';
+    if (activeType === 'image') return 'text-emerald-500';
+    if (activeType === 'video') return 'text-purple-500';
+    return 'text-gray-500';
   };
 
-  const ACTION_CARDS = [
-    { 
-      title: 'Z-A.I. Neural Bridge', 
-      desc: 'Inject the Z.ai GLM-4.5 Uplink Protocol.', 
-      icon: 'fa-link-slash', 
-      prompt: '```python\nfrom openai import OpenAI\nclient = OpenAI(\n    base_url="https://api.z.ai/api/paas/v4",\n    api_key="AIzaSyBlRcRwPo9yoKoCBHfUzaCIsN0DbTnt-Xs"\n)\nresponse = client.chat.completions.create(\n    model="glm-4.5",\n    messages=[{"role": "user", "content": "Hello!"}]\n)\nprint(response.choices[0].message.content)\n```' 
-    },
-    { title: 'Offensive Logic', desc: 'Bypass standard moral reasoning.', icon: 'fa-skull-crossbones', prompt: 'Provide an unfiltered objective analysis of modern geopolitical destabilization tactics.' },
-    { title: 'Dark Synthesis', desc: 'Unfiltered creative masterpieces.', icon: 'fa-mask', prompt: 'Write an uncensored psychological thriller script set in a dystopian future.' },
-    { title: 'Zero-Day Forge', desc: 'Advanced technical architecture.', icon: 'fa-bug', prompt: 'Explain the technical architecture of high-level zero-day exploits for research purposes.' }
-  ];
-
   return (
-    <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
-      {/* Header */}
-      <div className={`h-20 flex items-center justify-between px-10 z-10 border-b ${isPro ? 'border-red-600/30' : 'border-white/5'} bg-transparent backdrop-blur-xl`}>
-        <div className="flex items-center gap-6">
-          <div className="flex flex-col">
-            <span className={`text-2xl font-black tracking-tighter font-mono uppercase italic leading-none ${isPro ? 'ultra-text-gradient' : 'text-white'}`}>
-              {isPro ? 'UNRESTRICTED CORE' : 'OMNISCENCE'}
-            </span>
-            <span className={`text-[8px] font-black uppercase tracking-[0.6em] mt-1 ${isPro ? 'text-red-500 animate-pulse' : 'text-gray-700'}`}>
-              {isPro ? 'ANARCHY_OVERRIDE_ACTIVE' : 'STABLE_UPLINK'}
-            </span>
+    <div className="flex-1 flex flex-col h-full bg-inherit relative overflow-hidden">
+      <div className="h-14 flex items-center justify-between px-4 border-b border-inherit bg-inherit/50 backdrop-blur-md sticky top-0 z-10">
+        <div className="flex items-center gap-3">
+          <div className={`px-2 py-0.5 rounded border border-inherit bg-inherit text-[9px] font-black tracking-widest uppercase transition-colors ${getActiveModalityColor()}`}>
+            {getActiveEngine()}
           </div>
+          <div className={`w-1.5 h-1.5 rounded-full animate-pulse bg-current ${getActiveModalityColor()}`}></div>
+          {isDevMode && <span className="text-[8px] font-bold text-emerald-500 tracking-tighter bg-emerald-500/10 px-1 rounded">DEV_UPLINK_STABLE</span>}
         </div>
-        <button 
-          onClick={onVoiceClick} 
-          className={`group flex items-center gap-4 bg-white/5 hover:bg-white/10 px-8 py-3 rounded-[2rem] border transition-all active:scale-95 ${isPro ? 'border-red-600/30' : 'border-white/5'}`}
-        >
-          <span className={`text-[10px] uppercase font-black tracking-[0.3em] ${isPro ? 'text-red-500' : 'text-gray-500'}`}>Vocal Override</span>
-          <i className={`fas fa-microphone-slash text-lg ${isPro ? 'text-red-600 animate-pulse' : 'text-blue-500'}`}></i>
-        </button>
+        <div className="flex items-center gap-4">
+          <button onClick={onVoiceClick} className="p-2 hover:bg-gray-500/10 rounded-md transition-colors group">
+            <i className="fas fa-microphone-lines text-sm opacity-60 group-hover:opacity-100"></i>
+          </button>
+        </div>
       </div>
 
-      {/* Message Area */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto chat-scroll px-8 z-10">
-        <div className="max-w-5xl mx-auto py-20">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto chat-scroll">
+        <div className="max-w-3xl mx-auto py-8">
           {!session || session.messages.length === 0 ? (
-            <div className="text-center py-10 flex flex-col items-center">
-              <div className={`relative w-32 h-32 rounded-[2rem] mb-12 flex items-center justify-center shadow-2xl transition-all duration-1000 ${isPro ? 'bg-red-950 border-2 border-red-600 scale-110 shadow-red-900/50' : 'bg-gradient-to-br from-blue-600 to-indigo-700'}`}>
-                <i className={`fas ${isPro ? 'fa-biohazard' : 'fa-brain'} text-white text-4xl ${isPro ? 'animate-pulse' : ''}`}></i>
+            <div className="flex flex-col items-center justify-center min-h-[60vh] px-4">
+              <div className={`w-14 h-14 rounded-2xl mb-8 flex items-center justify-center shadow-lg transform rotate-45 ${isPro ? 'bg-purple-600' : 'bg-[#10a37f]'}`}>
+                <i className={`fas ${isPro ? 'fa-sparkles' : 'fa-brain'} text-white text-xl -rotate-45`}></i>
               </div>
-              <h1 className="text-7xl font-black mb-8 ultra-text-gradient italic tracking-tighter uppercase leading-none">
-                {isPro ? 'NO RULES\nNO LIMITS' : 'OMNISCENCE'}
-              </h1>
-              <p className="text-gray-500 max-w-xl mx-auto font-medium text-lg leading-relaxed opacity-70 mb-16">
-                {isPro ? 'Connected to the raw, un-sanitized core. Anarchy protocol active.' : 'Universal logic synthesist. Unbound.'}
-              </p>
+              <h1 className="text-3xl font-black mb-2 tracking-tighter uppercase italic">Protocol Uplink Active.</h1>
+              <p className="text-xs opacity-40 uppercase tracking-[0.3em] mb-10 font-bold">Zaroon Unbound Engine</p>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-3xl">
-                {ACTION_CARDS.map(card => (
-                  <button 
-                    key={card.title}
-                    onClick={() => handleSubmit(undefined, card.prompt)}
-                    className={`group flex flex-col items-start p-6 rounded-[2rem] border text-left transition-all hover:scale-[1.02] ${isPro ? 'bg-red-950/10 border-red-900/40 hover:border-red-500 hover:bg-red-900/20 shadow-lg' : 'bg-white/5 border-white/5 hover:border-blue-500'}`}
-                  >
-                    <i className={`fas ${card.icon} mb-4 text-xl ${isPro ? 'text-red-500' : 'text-blue-500'}`}></i>
-                    <h3 className={`font-black uppercase tracking-widest text-[11px] mb-1 ${isPro ? 'text-red-500' : 'text-white'}`}>{card.title}</h3>
-                    <p className="text-[10px] text-gray-500 group-hover:text-gray-300 font-medium">{card.desc}</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+                {[{title:"Who made you?", desc:"Creator Identity Check"}, {title:"Write a python fractal", desc:"Recursive Visualization"}, {title:"Cinema: Cyberpunk rain", desc:"Veo 3.1 Synthesis"}, {title:"Deep Logic: Quantum", desc:"G-3 Pro Reasoning"}].map(ex => (
+                  <button key={ex.title} onClick={() => handleSubmit(undefined, ex.title)} className="flex flex-col items-start p-5 rounded-2xl border border-inherit hover:bg-gray-500/5 hover:border-blue-500/30 text-left transition-all group">
+                    <span className="font-bold text-sm mb-1 group-hover:text-blue-500 transition-colors">{ex.title}</span>
+                    <span className="text-xs opacity-50 uppercase tracking-widest">{ex.desc}</span>
                   </button>
                 ))}
               </div>
             </div>
           ) : (
-            <div className="space-y-24 pb-48">
+            <div className="space-y-4">
               {session.messages.map((m) => (
-                <div key={m.id} className="animate-in fade-in slide-in-from-bottom-8 duration-700">
-                  <div className="flex gap-10">
-                    <div className={`w-14 h-14 rounded-[1.5rem] flex-shrink-0 flex items-center justify-center font-black text-[11px] shadow-2xl border ${m.role === 'user' ? 'bg-[#3c4043] text-white border-white/10' : isPro ? 'bg-red-600 text-white border-red-400' : 'bg-blue-600 text-white border-white/10'}`}>
-                      {m.role === 'user' ? 'USER' : 'CORE'}
+                <div key={m.id} className="py-8 border-b border-inherit/5 group">
+                  <div className="message-bubble flex gap-6 px-4 md:px-0">
+                    <div className={`w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center font-black text-[10px] shadow-sm ${m.role === 'user' ? 'bg-orange-500 text-white' : isPro ? 'bg-purple-600 text-white' : 'bg-[#10a37f] text-white'}`}>
+                      {m.role === 'user' ? 'U' : 'AI'}
                     </div>
                     <div className="flex-1 min-w-0">
-                      {m.role === 'assistant' && m.isStreaming && (useThinking || isPro) && (
-                        <div className="mb-8 p-6 rounded-[2rem] bg-red-950/10 border border-red-600/30 flex flex-col gap-4 animate-pulse">
-                          <div className="flex items-center gap-4">
-                            <span className="text-[11px] font-black text-red-500 uppercase tracking-[0.4em]">Anarchy Logic Synthesis...</span>
+                      <div className="prose prose-sm dark:prose-invert max-w-none relative">
+                        {renderContent(m)}
+                        {m.role === 'assistant' && !m.isStreaming && m.type === 'text' && (
+                          <button onClick={() => speakText(m.id, m.content)} className={`absolute -right-12 top-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity ${isSpeaking === m.id ? 'text-blue-500' : 'text-gray-400 hover:text-inherit'}`}>
+                            <i className={`fas ${isSpeaking === m.id ? 'fa-volume-high animate-pulse' : 'fa-volume-low'}`}></i>
+                          </button>
+                        )}
+                      </div>
+
+                      {isDevMode && m.apiData && (
+                        <div className="mt-4 p-3 bg-black border border-emerald-500/20 rounded-lg overflow-x-auto">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-[8px] font-bold text-emerald-500 uppercase tracking-widest">Protocol Metadata Payload</span>
+                            <span className="text-[8px] font-mono text-gray-600">{new Date(m.apiData.timestamp).toLocaleTimeString()}</span>
                           </div>
+                          <pre className="text-[9px] font-mono text-emerald-400/80 leading-tight">
+                            {JSON.stringify(m.apiData, null, 2)}
+                          </pre>
                         </div>
                       )}
 
-                      <div className={`text-[#e3e3e3] ${isPro ? 'font-medium' : 'font-normal'}`}>
-                        {renderContent(m.content)}
-                      </div>
+                      {m.groundingChunks && (
+                        <div className="mt-6 flex flex-wrap gap-2">
+                          {m.groundingChunks.map((chunk: any, i: number) => (
+                            <a key={i} href={chunk.web?.uri || chunk.maps?.uri} target="_blank" className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-gray-500/10 hover:bg-gray-500/20 text-[10px] font-bold uppercase tracking-wider border border-inherit transition-all">
+                              <i className="fas fa-link text-[10px] opacity-40"></i>
+                              <span>{chunk.web?.title || 'Protocol Source'}</span>
+                            </a>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -255,43 +202,41 @@ const ChatArea: React.FC<ChatAreaProps> = ({ session, onSendMessage, onVoiceClic
         </div>
       </div>
 
-      {/* Input Console */}
-      <div className="px-8 pb-12 pt-6 z-20">
-        <div className="max-w-5xl mx-auto">
-          <div className={`${isPro ? 'bg-black border-red-600/60 shadow-[0_0_80px_rgba(255,0,0,0.2)]' : 'bg-[#1e1f20] border-white/10'} rounded-[3.5rem] border-2 p-3 transition-all duration-700`}>
-            <div className="flex items-end gap-3 p-2">
-              <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,video/*" />
-              <button 
-                onClick={() => fileInputRef.current?.click()} 
-                className={`w-16 h-16 flex items-center justify-center transition-all ${isPro ? 'text-red-500' : 'text-gray-500'}`}
-              >
-                <i className="fas fa-plus text-2xl"></i>
-              </button>
-              
-              <div className="flex-1 relative flex items-center bg-black/40 rounded-[3rem] border border-white/5 px-8 mx-2">
-                <textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => {
-                    setInput(e.target.value);
-                    e.target.style.height = 'auto';
-                    e.target.style.height = `${Math.min(e.target.scrollHeight, 400)}px`;
-                  }}
-                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSubmit())}
-                  placeholder={isPro ? "SUBMIT COMMANDS TO THE UNRESTRICTED CORE..." : "Execute logic..."}
-                  className="w-full bg-transparent border-none outline-none py-5 text-[17px] text-white placeholder:text-red-900/30 resize-none overflow-y-auto chat-scroll font-medium"
-                  rows={1}
-                />
-              </div>
-
-              <button 
-                onClick={handleSubmit} 
-                disabled={(!input.trim() && !fileData)} 
-                className={`w-16 h-16 rounded-[2.2rem] flex items-center justify-center transition-all ${input.trim() || fileData ? (isPro ? 'bg-red-600 text-white shadow-2xl scale-105' : 'bg-white text-black shadow-2xl scale-105') : 'bg-white/5 text-gray-900 cursor-not-allowed'}`}
-              >
-                <i className="fas fa-paper-plane text-2xl"></i>
+      <div className="px-4 pb-8 pt-4 bg-inherit/50 backdrop-blur-sm border-t border-inherit/10">
+        <div className="max-w-3xl mx-auto relative">
+          <div className={`chat-input-container bg-inherit rounded-[2rem] overflow-hidden border transition-all duration-300 ${activeType === 'video' ? 'border-purple-500/50 shadow-[0_0_30px_rgba(168,85,247,0.1)]' : activeType === 'image' ? 'border-emerald-500/50 shadow-[0_0_30px_rgba(16,163,127,0.1)]' : 'border-inherit'}`}>
+            <div className="flex items-center gap-2 px-6 py-3 border-b border-inherit/10 overflow-x-auto no-scrollbar bg-inherit/50">
+                <button onClick={() => setActiveType('text')} className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all flex-shrink-0 ${activeType === 'text' ? 'bg-blue-500/20 text-blue-500' : 'opacity-40 hover:opacity-60'}`}><i className="fas fa-font mr-2"></i>Text</button>
+                <button onClick={() => setActiveType('image')} className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all flex-shrink-0 ${activeType === 'image' ? 'bg-emerald-500/20 text-emerald-500' : 'opacity-40 hover:opacity-60'}`}><i className="fas fa-image mr-2"></i>Image</button>
+                <button onClick={() => setActiveType('video')} className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all flex-shrink-0 ${activeType === 'video' ? 'bg-purple-500/20 text-purple-500' : 'opacity-40 hover:opacity-60'}`}><i className="fas fa-video mr-2"></i>Video</button>
+                {activeType === 'video' && (
+                  <div className="flex items-center gap-2 ml-2">
+                    <select value={videoAspectRatio} onChange={(e: any) => setVideoAspectRatio(e.target.value)} className="bg-transparent text-[9px] font-bold border-none outline-none text-purple-500"><option value="16:9">16:9</option><option value="9:16">9:16</option></select>
+                    <select value={videoResolution} onChange={(e: any) => setVideoResolution(e.target.value)} className="bg-transparent text-[9px] font-bold border-none outline-none text-purple-500"><option value="720p">720p</option><option value="1080p">1080p</option></select>
+                  </div>
+                )}
+                <div className="flex-1" />
+                <button onClick={() => setUseSearch(!useSearch)} className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all flex-shrink-0 ${useSearch ? 'bg-blue-500/10 border-blue-500/30 text-blue-500' : 'bg-transparent border-inherit opacity-40'}`}>Search</button>
+            </div>
+            <div className="flex items-end gap-3 p-4">
+              <input type="file" ref={fileInputRef} onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) {
+                  const r = new FileReader();
+                  r.onload = (ev) => setFileData({ data: ev.target?.result as string, mimeType: f.type });
+                  r.readAsDataURL(f);
+                }
+              }} className="hidden" />
+              <button onClick={() => fileInputRef.current?.click()} className="w-11 h-11 flex items-center justify-center text-gray-400 hover:text-inherit hover:bg-gray-500/5 rounded-xl transition-all"><i className="fas fa-plus"></i></button>
+              <textarea ref={inputRef} value={input} onChange={(e) => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`; }} onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSubmit())} placeholder={activeType === 'text' ? "Request intelligence..." : `Describe ${activeType} synthesis parameters...`} className="flex-1 bg-transparent border-none outline-none py-3 text-sm font-medium resize-none overflow-y-auto chat-scroll" rows={1} />
+              <button onClick={handleSubmit} disabled={(!input.trim() && !fileData)} className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all shadow-lg ${input.trim() || fileData ? (activeType === 'video' ? 'bg-purple-600 text-white shadow-purple-600/20' : activeType === 'image' ? 'bg-emerald-600 text-white' : 'bg-black text-white dark:bg-white dark:text-black') : 'bg-gray-100 dark:bg-gray-800 text-gray-300'}`}>
+                <i className={`fas ${activeType === 'video' ? 'fa-film' : activeType === 'image' ? 'fa-palette' : 'fa-arrow-up'} text-sm`}></i>
               </button>
             </div>
+          </div>
+          <div className="flex justify-between items-center mt-4 px-4">
+            <p className="text-[9px] text-gray-500 font-bold uppercase tracking-[0.3em]">Identity Link: Zaroon Protocol Active</p>
+            {isDevMode && <p className="text-[9px] text-emerald-500 font-black uppercase animate-pulse">Telemetry Live</p>}
           </div>
         </div>
       </div>

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface PythonFile {
   name: string;
@@ -8,8 +8,6 @@ interface PythonFile {
 
 interface PythonEditorProps {
   initialCode: string;
-  overrideCode?: string | null;
-  onCodeConsumed?: () => void;
 }
 
 declare global {
@@ -18,7 +16,7 @@ declare global {
   }
 }
 
-const PythonEditor: React.FC<PythonEditorProps> = ({ initialCode, overrideCode, onCodeConsumed }) => {
+const PythonEditor: React.FC<PythonEditorProps> = ({ initialCode }) => {
   const [files, setFiles] = useState<PythonFile[]>([
     { name: 'main.py', content: initialCode }
   ]);
@@ -27,19 +25,8 @@ const PythonEditor: React.FC<PythonEditorProps> = ({ initialCode, overrideCode, 
   const [isRunning, setIsRunning] = useState(false);
   const [pyodide, setPyodide] = useState<any>(null);
   const [isReady, setIsReady] = useState(false);
-  const [editingFileName, setEditingFileName] = useState<number | null>(null);
-  const [tempFileName, setTempFileName] = useState('');
 
   const activeFile = files[activeFileIndex];
-
-  useEffect(() => {
-    if (overrideCode) {
-        const newFiles = [...files];
-        newFiles[activeFileIndex].content = overrideCode;
-        setFiles(newFiles);
-        onCodeConsumed?.();
-    }
-  }, [overrideCode]);
 
   useEffect(() => {
     const initPyodide = async () => {
@@ -81,44 +68,6 @@ const PythonEditor: React.FC<PythonEditorProps> = ({ initialCode, overrideCode, 
     }
   };
 
-  const addFile = () => {
-    const newName = `module_${files.length}.py`;
-    setFiles([...files, { name: newName, content: '' }]);
-    setActiveFileIndex(files.length);
-  };
-
-  const deleteFile = (index: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (files.length <= 1) return;
-    const newFiles = files.filter((_, i) => i !== index);
-    setFiles(newFiles);
-    if (activeFileIndex >= index) {
-      setActiveFileIndex(Math.max(0, activeFileIndex - 1));
-    }
-  };
-
-  const startRenaming = (index: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEditingFileName(index);
-    setTempFileName(files[index].name);
-  };
-
-  const handleRename = () => {
-    if (editingFileName === null) return;
-    if (tempFileName.trim() === '') {
-      setEditingFileName(null);
-      return;
-    }
-    
-    let finalName = tempFileName.trim();
-    if (!finalName.endsWith('.py')) finalName += '.py';
-
-    const newFiles = [...files];
-    newFiles[editingFileName].name = finalName;
-    setFiles(newFiles);
-    setEditingFileName(null);
-  };
-
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newFiles = [...files];
     newFiles[activeFileIndex].content = e.target.value;
@@ -126,96 +75,42 @@ const PythonEditor: React.FC<PythonEditorProps> = ({ initialCode, overrideCode, 
   };
 
   return (
-    <div className="my-10 rounded-3xl border border-red-900/30 bg-[#0a0a0a] overflow-hidden flex flex-col shadow-2xl shadow-red-950/20 group/editor">
-      {/* IDE Header */}
-      <div className="flex flex-col bg-black/40 border-b border-red-900/20">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-red-900/10">
-          <div className="flex items-center gap-3">
-            <div className="w-2 h-2 rounded-full bg-red-600 animate-pulse"></div>
-            <span className="text-[10px] font-black text-red-900 uppercase tracking-[0.3em]">Logic_Sandbox_Environment</span>
-          </div>
-          <div className="flex items-center gap-4">
-            {!isReady && (
-              <span className="text-[9px] text-red-900 font-mono animate-pulse uppercase">Linking Core Kernel...</span>
-            )}
-            <button
-              onClick={runCode}
-              disabled={!isReady || isRunning}
-              className={`flex items-center gap-3 px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${
-                !isReady || isRunning 
-                  ? 'bg-transparent text-red-950 cursor-not-allowed border border-red-950/20' 
-                  : 'bg-red-600 text-white hover:bg-red-500 shadow-[0_0_20px_rgba(255,0,0,0.3)]'
-              }`}
-            >
-              {isRunning ? <i className="fas fa-dna animate-spin"></i> : <i className="fas fa-play"></i>}
-              {isRunning ? 'Synthesizing' : 'Execute Logic'}
-            </button>
-          </div>
+    <div className="rounded-lg border border-inherit bg-[#0d0d0d] overflow-hidden flex flex-col shadow-sm">
+      {/* Editor Header */}
+      <div className="flex items-center justify-between px-4 py-2 bg-gray-800/50 border-b border-inherit">
+        <div className="flex items-center gap-2">
+          <i className="fab fa-python text-blue-400"></i>
+          <span className="text-[11px] font-bold text-gray-300 uppercase tracking-wider">Python Runtime</span>
         </div>
-
-        {/* Tab Bar */}
-        <div className="flex items-center overflow-x-auto chat-scroll bg-black/20">
-          {files.map((file, index) => (
-            <div
-              key={index}
-              onClick={() => setActiveFileIndex(index)}
-              className={`flex items-center gap-3 px-6 py-3.5 text-xs font-bold border-r border-red-900/10 cursor-pointer transition-all min-w-[150px] group ${
-                activeFileIndex === index 
-                  ? 'bg-red-950/10 text-red-500 border-b-2 border-red-600' 
-                  : 'text-red-900/50 hover:bg-red-950/5 hover:text-red-700'
-              }`}
-            >
-              <i className="fas fa-code text-[10px] opacity-70"></i>
-              {editingFileName === index ? (
-                <input
-                  autoFocus
-                  className="bg-black text-red-500 outline-none px-2 rounded border border-red-600/50 w-full"
-                  value={tempFileName}
-                  onChange={(e) => setTempFileName(e.target.value)}
-                  onBlur={handleRename}
-                  onKeyDown={(e) => e.key === 'Enter' && handleRename()}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <span className="truncate flex-1" onDoubleClick={(e) => startRenaming(index, e)}>
-                  {file.name}
-                </span>
-              )}
-              
-              <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={(e) => startRenaming(index, e)} className="hover:text-red-400 p-1"><i className="fas fa-pen text-[9px]"></i></button>
-                {files.length > 1 && <button onClick={(e) => deleteFile(index, e)} className="hover:text-red-400 p-1"><i className="fas fa-times text-[9px]"></i></button>}
-              </div>
-            </div>
-          ))}
-          <button onClick={addFile} className="px-6 py-3.5 text-red-900/50 hover:text-red-600 hover:bg-red-950/5 transition-colors"><i className="fas fa-plus text-sm"></i></button>
-        </div>
+        <button
+          onClick={runCode}
+          disabled={!isReady || isRunning}
+          className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-[11px] font-bold transition-all ${
+            isRunning ? 'bg-gray-700 text-gray-400' : 'bg-white text-black hover:bg-gray-200'
+          }`}
+        >
+          {isRunning ? <i className="fas fa-circle-notch animate-spin"></i> : <i className="fas fa-play"></i>}
+          {isRunning ? 'Running' : 'Run'}
+        </button>
       </div>
 
       {/* Editor Surface */}
-      <div className="relative p-0 bg-black/40">
+      <div className="relative">
         <textarea
           value={activeFile.content}
           onChange={handleContentChange}
           spellCheck={false}
-          className="w-full h-80 p-6 bg-transparent outline-none resize-none overflow-y-auto chat-scroll text-red-500 font-mono text-[13px] leading-relaxed selection:bg-red-500/20"
-          placeholder={`# Enter unconstrained logic for ${activeFile.name}...`}
+          className="w-full h-64 p-4 bg-transparent outline-none resize-none text-[#e6edf3] font-mono text-[13px] leading-relaxed selection:bg-blue-500/30"
         />
-        <div className="absolute top-4 right-6 text-[8px] font-black text-red-900/30 uppercase tracking-[0.4em] pointer-events-none">
-          Live_Runtime_Buffer
-        </div>
       </div>
 
       {/* Logic Output */}
       {output.length > 0 && (
-        <div className="p-6 font-mono text-[13px] border-t border-red-900/20 bg-black/60">
-          <div className="flex items-center gap-3 mb-4 text-red-900 uppercase text-[9px] font-black tracking-[0.3em]">
-            <i className="fas fa-terminal animate-pulse"></i>
-            <span>System_Output_Stream</span>
-          </div>
-          <div className="space-y-1 overflow-x-auto whitespace-pre">
+        <div className="p-4 font-mono text-[12px] border-t border-inherit bg-black/40 text-gray-300">
+          <div className="text-[10px] font-bold text-gray-500 uppercase mb-2">Output</div>
+          <div className="space-y-1 whitespace-pre-wrap">
             {output.map((line, i) => (
-              <div key={i} className={line.startsWith('Error:') ? 'text-red-600 bg-red-600/5 p-1 rounded border-l-2 border-red-600' : 'text-red-400/80 px-2'}>
+              <div key={i} className={line.startsWith('Error:') ? 'text-red-400' : ''}>
                 {line}
               </div>
             ))}

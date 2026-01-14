@@ -11,6 +11,7 @@ export interface Message {
   isStreaming?: boolean;
   groundingChunks?: any[];
   thinking?: string;
+  apiData?: any; // Stores raw API metadata for Dev Mode
 }
 
 export interface ChatSession {
@@ -36,6 +37,7 @@ export enum AppMode {
 export interface GenerationOptions {
   aspectRatio?: "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9";
   imageSize?: "1K" | "2K" | "4K";
+  resolution?: "720p" | "1080p";
   useSearch?: boolean;
   useMaps?: boolean;
   useThinking?: boolean;
