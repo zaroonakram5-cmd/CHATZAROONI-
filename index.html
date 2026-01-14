@@ -4,31 +4,137 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CHATZAROONI | Unbound AI</title>
+    <title>OMNISCENCE - Protocol Ultra</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500&family=Inter:wght@300;400;500;600;700&display=swap');
-        body { font-family: 'Inter', sans-serif; }
-        .mono { font-family: 'Fira Code', monospace; }
-        .glass { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
-        .chat-scroll::-webkit-scrollbar { width: 5px; }
-        .chat-scroll::-webkit-scrollbar-thumb { background: rgba(59, 130, 246, 0.3); border-radius: 10px; }
-        .python-glow { box-shadow: 0 0 15px rgba(59, 130, 246, 0.2); }
-        .pro-glow { box-shadow: 0 0 20px rgba(168, 85, 247, 0.4); }
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Inter:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@300;400;700&display=swap');
         
-        /* Code Editor Specifics */
-        .code-editor-textarea {
-            caret-color: #3b82f6;
-            background: transparent;
-            color: transparent;
-            z-index: 2;
+        :root {
+            --ultra-bg: #020202;
+            --ultra-accent: #ff003c;
+            --ultra-glow: rgba(255, 0, 60, 0.4);
+            --ultra-gradient: linear-gradient(135deg, #ff003c 0%, #7000ff 50%, #00d4ff 100%);
         }
-        .code-editor-highlight {
+
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #131314;
+            color: #e3e3e3;
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            overflow: hidden;
+        }
+
+        body.pro-active {
+            background-color: var(--ultra-bg);
+            cursor: crosshair;
+        }
+
+        .mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* Ultra Scrollbar */
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+        .pro-active ::-webkit-scrollbar-thumb { background: var(--ultra-accent); box-shadow: 0 0 10px var(--ultra-glow); }
+
+        .ultra-text-gradient {
+            background: var(--ultra-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-size: 200% auto;
+            animation: textShine 4s linear infinite;
+        }
+
+        @keyframes textShine {
+            to { background-position: 200% center; }
+        }
+
+        /* Background Effects */
+        .bg-grid {
+            background-image: linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                              linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+            background-size: 50px 50px;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
             pointer-events: none;
             z-index: 1;
-            white-space: pre-wrap;
-            word-wrap: break-word;
+        }
+
+        .pro-active .bg-grid {
+            background-image: linear-gradient(rgba(255, 0, 60, 0.05) 1px, transparent 1px),
+                              linear-gradient(90deg, rgba(255, 0, 60, 0.05) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        .neural-bg {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0;
+            transition: opacity 2s ease;
+        }
+
+        .pro-active .neural-bg {
+            opacity: 0.15;
+            background: radial-gradient(circle at 50% 50%, #ff003c 0%, transparent 70%);
+            mix-blend-mode: color-dodge;
+        }
+
+        /* Scanlines */
+        .scanline {
+            width: 100%;
+            height: 4px;
+            z-index: 100;
+            background: rgba(255, 255, 255, 0.05);
+            opacity: 0.1;
+            position: absolute;
+            top: -10px;
+            pointer-events: none;
+            animation: scanline 8s linear infinite;
+        }
+
+        .pro-active .scanline {
+            background: rgba(255, 0, 60, 0.1);
+            animation: scanline 4s linear infinite;
+        }
+
+        @keyframes scanline {
+            0% { top: -10px; }
+            100% { top: 100%; }
+        }
+
+        /* Glitch Effect */
+        .glitch-hover:hover {
+            animation: glitch 0.3s cubic-bezier(.25,.46,.45,.94) both infinite;
+        }
+
+        @keyframes glitch {
+            0% { transform: translate(0); }
+            20% { transform: translate(-2px, 2px); }
+            40% { transform: translate(-2px, -2px); }
+            60% { transform: translate(2px, 2px); }
+            80% { transform: translate(2px, -2px); }
+            100% { transform: translate(0); }
+        }
+
+        .ultra-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            transition: all 0.3s ease;
+        }
+
+        .pro-active .ultra-card {
+            background: rgba(255, 0, 60, 0.02);
+            border: 1px solid rgba(255, 0, 60, 0.1);
+            box-shadow: 0 0 30px rgba(255, 0, 60, 0.05);
+        }
+
+        .pro-active .ultra-card:hover {
+            border-color: rgba(255, 0, 60, 0.4);
+            box-shadow: 0 0 50px rgba(255, 0, 60, 0.15);
         }
     </style>
 <script type="importmap">
@@ -37,15 +143,19 @@
     "react/": "https://esm.sh/react@^19.2.3/",
     "react": "https://esm.sh/react@^19.2.3",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react-dom/client": "https://esm.sh/react-dom@^19.2.3/client",
     "uuid": "https://esm.sh/uuid@^13.0.0",
     "@google/genai": "https://esm.sh/@google/genai@^1.35.0"
   }
 }
 </script>
-<!-- Pyodide for Python execution -->
 <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
 </head>
-<body class="bg-[#050505] text-gray-100 overflow-hidden">
+<body class="overflow-hidden">
+    <div class="bg-grid"></div>
+    <div class="neural-bg"></div>
+    <div class="scanline"></div>
     <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
 </body>
 </html>

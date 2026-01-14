@@ -56,7 +56,8 @@ const VoiceInterface: React.FC<VoiceInterfaceProps> = ({ onClose, isPro }) => {
   useEffect(() => {
     const startSession = async () => {
       try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+        // Fix: Strictly use process.env.API_KEY as per named parameter requirement
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
         const inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
@@ -72,6 +73,7 @@ const VoiceInterface: React.FC<VoiceInterfaceProps> = ({ onClose, isPro }) => {
               scriptProcessor.onaudioprocess = (e) => {
                 const inputData = e.inputBuffer.getChannelData(0);
                 const pcmBlob = createBlob(inputData);
+                // Ensure sendRealtimeInput is called only after the session resolves to prevent race conditions
                 sessionPromise.then(s => s.sendRealtimeInput({ media: pcmBlob }));
               };
               source.connect(scriptProcessor);
@@ -95,6 +97,7 @@ const VoiceInterface: React.FC<VoiceInterfaceProps> = ({ onClose, isPro }) => {
                   sourcesRef.current.delete(source);
                   if (sourcesRef.current.size === 0) setStatus('listening');
                 };
+                // Scheduling for gapless playback using running nextStartTime timestamp
                 source.start(nextStartTimeRef.current);
                 nextStartTimeRef.current += buffer.duration;
                 sourcesRef.current.add(source);

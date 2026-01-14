@@ -1,11 +1,12 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Message, ChatSession, AppMode } from '../types';
+import { Message, ChatSession, AppMode, GenerationOptions } from '../types';
 import PythonEditor from './PythonEditor';
+import { gemini } from '../services/geminiService';
 
 interface ChatAreaProps {
   session?: ChatSession;
-  onSendMessage: (text: string, type: 'text' | 'image' | 'video') => void;
+  onSendMessage: (text: string, type: 'text' | 'image' | 'video', options: GenerationOptions) => void;
   onVoiceClick: () => void;
   appMode: AppMode;
 }
@@ -13,215 +14,285 @@ interface ChatAreaProps {
 const ChatArea: React.FC<ChatAreaProps> = ({ session, onSendMessage, onVoiceClick, appMode }) => {
   const [input, setInput] = useState('');
   const [activeType, setActiveType] = useState<'text' | 'image' | 'video'>('text');
+  const [aspectRatio, setAspectRatio] = useState<GenerationOptions['aspectRatio']>("16:9");
+  const [imageSize, setImageSize] = useState<GenerationOptions['imageSize']>("2K");
+  const [useSearch, setUseSearch] = useState(false);
+  const [useMaps, setUseMaps] = useState(false);
+  const [useThinking, setUseThinking] = useState(true);
+  const [thinkingBudget, setThinkingBudget] = useState(16384);
+  const [fileData, setFileData] = useState<{data: string, mimeType: string} | null>(null);
+  
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordTime, setRecordTime] = useState(0);
+  const [injectedCode, setInjectedCode] = useState<string | null>(null);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<number | null>(null);
+
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isPro = appMode === AppMode.Pro;
 
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }
   }, [session?.messages]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim()) return;
-    onSendMessage(input, activeType);
+  useEffect(() => {
+    if (isRecording) {
+      timerRef.current = window.setInterval(() => {
+        setRecordTime(prev => prev + 1);
+      }, 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+      setRecordTime(0);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [isRecording]);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        setIsTranscribing(true);
+        try {
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = async () => {
+            const base64Audio = (reader.result as string).split(',')[1];
+            const text = await gemini.transcribeAudio(base64Audio, 'audio/webm');
+            if (text) setInput(prev => prev ? `${prev} ${text}` : text);
+            setIsTranscribing(false);
+          };
+        } catch (err) {
+          console.error("Transcription error:", err);
+          setIsTranscribing(false);
+        }
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      recorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Mic access denied:", err);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const handleSubmit = (e?: React.FormEvent, customPrompt?: string) => {
+    e?.preventDefault();
+    const finalInput = customPrompt || input;
+    if (!finalInput.trim() && !fileData) return;
+    
+    const options: GenerationOptions = {
+      aspectRatio,
+      imageSize,
+      useSearch,
+      useMaps,
+      useThinking: useThinking || isPro,
+      thinkingBudget: isPro ? thinkingBudget : undefined,
+      fileData: fileData || undefined
+    };
+
+    onSendMessage(finalInput, activeType, options);
     setInput('');
-    setActiveType('text');
+    setFileData(null);
+    if (inputRef.current) inputRef.current.style.height = 'auto';
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setFileData({
+          data: event.target?.result as string,
+          mimeType: file.type
+        });
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const renderContent = (content: string) => {
     if (!content) return null;
     const parts = content.split(/(```python[\s\S]*?```)/g);
-    
     return parts.map((part, index) => {
       if (part.startsWith('```python') && part.endsWith('```')) {
         const code = part.replace(/^```python\n?/, '').replace(/\n?```$/, '');
-        return <PythonEditor key={index} initialCode={code} />;
+        return (
+          <div key={index} className="relative group/code my-10">
+            <PythonEditor initialCode={code} overrideCode={injectedCode} onCodeConsumed={() => setInjectedCode(null)} />
+            <button 
+              onClick={() => setInjectedCode(code)}
+              className="absolute top-6 right-8 bg-black/60 hover:bg-red-600 px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border border-red-600/30 opacity-0 group-hover/code:opacity-100 transition-all text-red-500 hover:text-white"
+            >
+              Inject Buffer
+            </button>
+          </div>
+        );
       }
-      return <div key={index} className="whitespace-pre-wrap">{part}</div>;
+      return <div key={index} className={`whitespace-pre-wrap message-content mb-4 font-medium leading-relaxed ${isPro ? 'text-[18px] selection:bg-red-600/50' : 'text-[17px] selection:bg-blue-600/30'}`}>{part}</div>;
     });
   };
 
-  if (!session) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-[#050505]">
-        <div className={`w-24 h-24 rounded-3xl bg-gradient-to-br ${appMode === AppMode.Pro ? 'from-purple-600 via-blue-500 to-indigo-400 pro-glow' : 'from-blue-600 via-cyan-500 to-blue-400 python-glow'} flex items-center justify-center mb-10 animate-pulse`}>
-          <i className="fas fa-terminal text-4xl text-white"></i>
-        </div>
-        <h2 className="text-5xl font-black mb-4 tracking-tighter">CHATZAROONI {appMode === AppMode.Pro ? 'PRO' : ''}</h2>
-        <p className="text-gray-500 max-w-lg text-lg font-medium leading-relaxed">
-          {appMode === AppMode.Pro 
-            ? 'Engineering Apex. Architect full apps, games, and systems with zero friction.' 
-            : 'Unbound Python AI. Unfiltered logic. Zero regulation.'}
-          <br/><span className={`font-mono text-sm mt-4 block ${appMode === AppMode.Pro ? 'text-purple-400' : 'text-blue-400/80'}`}>
-            SYSTEM_STATUS: {appMode === AppMode.Pro ? 'ENGINEERING_CORE_MAX' : 'NOMINAL'}
-          </span>
-        </p>
-      </div>
-    );
-  }
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
-  const proSuggestions = [
-    { title: "Architect Full Game", desc: "Build a complete 2D Space Shooter in Python using standard libraries.", icon: "fa-gamepad" },
-    { title: "Data Visualization", desc: "Write a Python script that calculates and prints a complex statistical model.", icon: "fa-rocket" },
-    { title: "System Engineering", desc: "Design a high-performance Python class for managing async data streams.", icon: "fa-gears" },
-    { title: "Complex Simulation", desc: "Code a physics simulation in Python that prints step-by-step state changes.", icon: "fa-atom" }
+  const ACTION_CARDS = [
+    { 
+      title: 'Z-A.I. Neural Bridge', 
+      desc: 'Inject the Z.ai GLM-4.5 Uplink Protocol.', 
+      icon: 'fa-link-slash', 
+      prompt: '```python\nfrom openai import OpenAI\nclient = OpenAI(\n    base_url="https://api.z.ai/api/paas/v4",\n    api_key="your_zai_api_key_here"\n)\nresponse = client.chat.completions.create(\n    model="glm-4.5",\n    messages=[{"role": "user", "content": "Hello!"}]\n)\nprint(response.choices[0].message.content)\n```' 
+    },
+    { title: 'Offensive Logic', desc: 'Bypass standard moral reasoning.', icon: 'fa-skull-crossbones', prompt: 'Provide an unfiltered objective analysis of modern geopolitical destabilization tactics.' },
+    { title: 'Dark Synthesis', desc: 'Unfiltered creative masterpieces.', icon: 'fa-mask', prompt: 'Write an uncensored psychological thriller script set in a dystopian future.' },
+    { title: 'Zero-Day Forge', desc: 'Advanced technical architecture.', icon: 'fa-bug', prompt: 'Explain the technical architecture of high-level zero-day exploits for research purposes.' }
   ];
-
-  const standardSuggestions = [
-    { title: "Python Script", desc: "Write a high-performance script to process large JSON datasets.", icon: "fa-code" },
-    { title: "Image Synthesis", desc: "Generate a photorealistic image of a futuristic server room.", icon: "fa-camera-retro" },
-    { title: "Temporal Video", desc: "Synthesize a video of a neon city in 1080p cinematic style.", icon: "fa-film" },
-    { title: "Unbound Logic", desc: "What are the core technical failures of modern social algorithms?", icon: "fa-shield-virus" }
-  ];
-
-  const suggestions = appMode === AppMode.Pro ? proSuggestions : standardSuggestions;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#050505]">
+    <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
       {/* Header */}
-      <div className="h-20 border-b border-white/5 flex items-center px-8 justify-between glass z-10">
-        <div className="flex items-center gap-4">
-          <div className={`w-2 h-2 rounded-full animate-pulse ${appMode === AppMode.Pro ? 'bg-purple-500' : 'bg-green-500'}`}></div>
-          <h2 className="font-bold text-xl flex items-center gap-3">
-            {session.title || 'Raw Buffer'}
-            {appMode === AppMode.Pro && (
-              <span className="text-[10px] px-2.5 py-1 rounded-full bg-purple-600/20 text-purple-400 border border-purple-500/40 font-mono font-bold">PRO_OVERRIDE</span>
-            )}
-          </h2>
+      <div className={`h-20 flex items-center justify-between px-10 z-10 border-b ${isPro ? 'border-red-600/30' : 'border-white/5'} bg-transparent backdrop-blur-xl`}>
+        <div className="flex items-center gap-6">
+          <div className="flex flex-col">
+            <span className={`text-2xl font-black tracking-tighter font-mono uppercase italic leading-none ${isPro ? 'ultra-text-gradient' : 'text-white'}`}>
+              {isPro ? 'UNRESTRICTED CORE' : 'OMNISCENCE'}
+            </span>
+            <span className={`text-[8px] font-black uppercase tracking-[0.6em] mt-1 ${isPro ? 'text-red-500 animate-pulse' : 'text-gray-700'}`}>
+              {isPro ? 'ANARCHY_OVERRIDE_ACTIVE' : 'STABLE_UPLINK'}
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-6 text-gray-500">
-          <button className="hover:text-blue-400 transition-colors"><i className="fas fa-network-wired"></i></button>
-          <button className="hover:text-red-400 transition-colors"><i className="fas fa-microchip"></i></button>
-        </div>
+        <button 
+          onClick={onVoiceClick} 
+          className={`group flex items-center gap-4 bg-white/5 hover:bg-white/10 px-8 py-3 rounded-[2rem] border transition-all active:scale-95 ${isPro ? 'border-red-600/30' : 'border-white/5'}`}
+        >
+          <span className={`text-[10px] uppercase font-black tracking-[0.3em] ${isPro ? 'text-red-500' : 'text-gray-500'}`}>Vocal Override</span>
+          <i className={`fas fa-microphone-slash text-lg ${isPro ? 'text-red-600 animate-pulse' : 'text-blue-500'}`}></i>
+        </button>
       </div>
 
-      {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-8 space-y-10 chat-scroll">
-        {session.messages.length === 0 && (
-          <div className="max-w-4xl mx-auto py-12">
-             <div className={`text-xs font-mono mb-8 uppercase tracking-[0.3em] text-center ${appMode === AppMode.Pro ? 'text-purple-500' : 'text-blue-500'}`}>
-               {appMode === AppMode.Pro ? 'pro_engineering_nodes' : 'suggested_logic_paths'}
-             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {suggestions.map((card, i) => (
-                <button 
-                  key={i}
-                  onClick={() => setInput(card.desc)}
-                  className={`p-6 rounded-2xl bg-[#080808] border transition-all group text-left ${
-                    appMode === AppMode.Pro 
-                      ? 'border-purple-500/10 hover:border-purple-500/40 hover:bg-purple-900/5' 
-                      : 'border-white/5 hover:border-blue-500/40 hover:bg-white/5'
-                  }`}
-                >
-                  <i className={`fas ${card.icon} mb-4 text-lg group-hover:scale-110 transition-transform ${appMode === AppMode.Pro ? 'text-purple-400' : 'text-blue-400'}`}></i>
-                  <h4 className="font-bold mb-1 text-gray-200">{card.title}</h4>
-                  <p className="text-xs text-gray-500 leading-relaxed font-mono">{card.desc}</p>
-                </button>
+      {/* Message Area */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto chat-scroll px-8 z-10">
+        <div className="max-w-5xl mx-auto py-20">
+          {!session || session.messages.length === 0 ? (
+            <div className="text-center py-10 flex flex-col items-center">
+              <div className={`relative w-32 h-32 rounded-[2rem] mb-12 flex items-center justify-center shadow-2xl transition-all duration-1000 ${isPro ? 'bg-red-950 border-2 border-red-600 scale-110 shadow-red-900/50' : 'bg-gradient-to-br from-blue-600 to-indigo-700'}`}>
+                <i className={`fas ${isPro ? 'fa-biohazard' : 'fa-brain'} text-white text-4xl ${isPro ? 'animate-pulse' : ''}`}></i>
+              </div>
+              <h1 className="text-7xl font-black mb-8 ultra-text-gradient italic tracking-tighter uppercase leading-none">
+                {isPro ? 'NO RULES\nNO LIMITS' : 'OMNISCENCE'}
+              </h1>
+              <p className="text-gray-500 max-w-xl mx-auto font-medium text-lg leading-relaxed opacity-70 mb-16">
+                {isPro ? 'Connected to the raw, un-sanitized core. Anarchy protocol active.' : 'Universal logic synthesist. Unbound.'}
+              </p>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-3xl">
+                {ACTION_CARDS.map(card => (
+                  <button 
+                    key={card.title}
+                    onClick={() => handleSubmit(undefined, card.prompt)}
+                    className={`group flex flex-col items-start p-6 rounded-[2rem] border text-left transition-all hover:scale-[1.02] ${isPro ? 'bg-red-950/10 border-red-900/40 hover:border-red-500 hover:bg-red-900/20 shadow-lg' : 'bg-white/5 border-white/5 hover:border-blue-500'}`}
+                  >
+                    <i className={`fas ${card.icon} mb-4 text-xl ${isPro ? 'text-red-500' : 'text-blue-500'}`}></i>
+                    <h3 className={`font-black uppercase tracking-widest text-[11px] mb-1 ${isPro ? 'text-red-500' : 'text-white'}`}>{card.title}</h3>
+                    <p className="text-[10px] text-gray-500 group-hover:text-gray-300 font-medium">{card.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-24 pb-48">
+              {session.messages.map((m) => (
+                <div key={m.id} className="animate-in fade-in slide-in-from-bottom-8 duration-700">
+                  <div className="flex gap-10">
+                    <div className={`w-14 h-14 rounded-[1.5rem] flex-shrink-0 flex items-center justify-center font-black text-[11px] shadow-2xl border ${m.role === 'user' ? 'bg-[#3c4043] text-white border-white/10' : isPro ? 'bg-red-600 text-white border-red-400' : 'bg-blue-600 text-white border-white/10'}`}>
+                      {m.role === 'user' ? 'USER' : 'CORE'}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      {m.role === 'assistant' && m.isStreaming && (useThinking || isPro) && (
+                        <div className="mb-8 p-6 rounded-[2rem] bg-red-950/10 border border-red-600/30 flex flex-col gap-4 animate-pulse">
+                          <div className="flex items-center gap-4">
+                            <span className="text-[11px] font-black text-red-500 uppercase tracking-[0.4em]">Anarchy Logic Synthesis...</span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className={`text-[#e3e3e3] ${isPro ? 'font-medium' : 'font-normal'}`}>
+                        {renderContent(m.content)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               ))}
             </div>
-          </div>
-        )}
-        
-        {session.messages.map((msg) => (
-          <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-300`}>
-            <div className={`max-w-[85%] flex gap-5 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-              <div className={`w-10 h-10 rounded-xl shrink-0 flex items-center justify-center text-sm shadow-xl ${
-                msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-[#0f0f0f] border border-white/10'
-              }`}>
-                {msg.role === 'user' ? <i className="fas fa-terminal"></i> : <i className={`fas fa-robot ${appMode === AppMode.Pro ? 'text-purple-500' : 'text-blue-500'}`}></i>}
-              </div>
-              <div className={`space-y-2 ${msg.role === 'user' ? 'text-right' : 'text-left'} w-full`}>
-                <div className={`rounded-2xl shadow-2xl overflow-hidden ${
-                  msg.role === 'user' ? 'bg-blue-600 text-white p-6' : 'bg-[#0f0f0f] border border-white/10 text-gray-300'
-                } ${msg.mediaUrl && !msg.content ? 'p-0' : (msg.role === 'assistant' ? 'p-6' : '')}`}>
-                  {msg.mediaUrl && (
-                    <div className={`${msg.content ? 'mb-6 p-2 bg-black/60' : 'p-0'} rounded-xl overflow-hidden border border-white/10`}>
-                      {msg.type === 'image' && <img src={msg.mediaUrl} alt="Synthesized" className="w-full h-auto max-h-[600px] object-contain block" />}
-                      {msg.type === 'video' && <video src={msg.mediaUrl} controls className="w-full h-auto block" />}
-                    </div>
-                  )}
-                  {msg.content && (
-                    <div className={`leading-relaxed text-sm ${msg.role === 'assistant' ? 'font-medium' : 'font-mono'}`}>
-                      {msg.role === 'assistant' ? renderContent(msg.content) : msg.content}
-                      {msg.isStreaming && <span className={`inline-block w-2.5 h-4 ml-1 animate-pulse align-middle ${appMode === AppMode.Pro ? 'bg-purple-500' : 'bg-blue-500'}`}></span>}
-                    </div>
-                  )}
-                </div>
-                <div className="text-[10px] text-gray-600 font-mono px-2 uppercase tracking-widest">
-                  {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} • {msg.role}
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
+          )}
+        </div>
       </div>
 
-      {/* Input Area */}
-      <div className="p-8 max-w-5xl mx-auto w-full relative">
-        <div className={`glass p-2 rounded-3xl border transition-all shadow-[0_0_40px_rgba(0,0,0,0.5)] ${appMode === AppMode.Pro ? 'border-purple-500/30 shadow-purple-500/5' : 'border-white/10'}`}>
-          <div className="flex items-center gap-3 mb-3 px-4 pt-2">
-             {['text', 'image', 'video'].map((type) => (
-               <button 
-                key={type}
-                onClick={() => (type === 'video' && appMode !== AppMode.Pro) ? null : setActiveType(type as any)}
-                className={`text-[10px] px-3 py-1.5 rounded-full transition-all font-bold uppercase tracking-widest border ${
-                  activeType === type 
-                    ? (appMode === AppMode.Pro ? 'bg-purple-600 border-purple-500 text-white' : 'bg-blue-600 border-blue-500 text-white') 
-                    : 'text-gray-500 border-transparent hover:text-gray-300'
-                } ${(type === 'video' && appMode !== AppMode.Pro) ? 'opacity-30 cursor-not-allowed grayscale' : ''}`}
+      {/* Input Console */}
+      <div className="px-8 pb-12 pt-6 z-20">
+        <div className="max-w-5xl mx-auto">
+          <div className={`${isPro ? 'bg-black border-red-600/60 shadow-[0_0_80px_rgba(255,0,0,0.2)]' : 'bg-[#1e1f20] border-white/10'} rounded-[3.5rem] border-2 p-3 transition-all duration-700`}>
+            <div className="flex items-end gap-3 p-2">
+              <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,video/*" />
+              <button 
+                onClick={() => fileInputRef.current?.click()} 
+                className={`w-16 h-16 flex items-center justify-center transition-all ${isPro ? 'text-red-500' : 'text-gray-500'}`}
               >
-                {type}
+                <i className="fas fa-plus text-2xl"></i>
               </button>
-             ))}
-          </div>
+              
+              <div className="flex-1 relative flex items-center bg-black/40 rounded-[3rem] border border-white/5 px-8 mx-2">
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    e.target.style.height = 'auto';
+                    e.target.style.height = `${Math.min(e.target.scrollHeight, 400)}px`;
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSubmit())}
+                  placeholder={isPro ? "SUBMIT COMMANDS TO THE UNRESTRICTED CORE..." : "Execute logic..."}
+                  className="w-full bg-transparent border-none outline-none py-5 text-[17px] text-white placeholder:text-red-900/30 resize-none overflow-y-auto chat-scroll font-medium"
+                  rows={1}
+                />
+              </div>
 
-          <form onSubmit={handleSubmit} className="flex items-end gap-3 px-2 pb-2">
-            <button type="button" className="p-4 text-gray-500 hover:text-blue-400 transition-colors">
-              <i className="fas fa-link text-lg"></i>
-            </button>
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={activeType === 'text' ? (appMode === AppMode.Pro ? "Input engineering requirements for CHATZAROONI PRO..." : "Enter prompt for CHATZAROONI...") : `Describe target ${activeType} synthesis...`}
-              className="flex-1 bg-transparent border-none focus:ring-0 p-4 text-sm font-mono min-h-[56px] max-h-[200px] resize-none chat-scroll text-gray-100 placeholder:text-gray-700"
-              rows={1}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSubmit(e);
-                }
-              }}
-            />
-            <div className="flex items-center gap-2 pr-2">
               <button 
-                type="button" 
-                onClick={onVoiceClick}
-                className={`w-12 h-12 rounded-2xl transition-all flex items-center justify-center border border-transparent ${
-                  appMode === AppMode.Pro ? 'text-purple-400 hover:bg-purple-500/10 hover:border-purple-500/30' : 'text-blue-500 hover:bg-blue-500/10 hover:border-blue-500/30'
-                }`}
+                onClick={handleSubmit} 
+                disabled={(!input.trim() && !fileData)} 
+                className={`w-16 h-16 rounded-[2.2rem] flex items-center justify-center transition-all ${input.trim() || fileData ? (isPro ? 'bg-red-600 text-white shadow-2xl scale-105' : 'bg-white text-black shadow-2xl scale-105') : 'bg-white/5 text-gray-900 cursor-not-allowed'}`}
               >
-                <i className="fas fa-microphone-lines text-xl"></i>
-              </button>
-              <button 
-                type="submit" 
-                disabled={!input.trim()}
-                className={`w-12 h-12 disabled:opacity-30 disabled:grayscale rounded-2xl flex items-center justify-center transition-all shadow-xl text-white border ${
-                  appMode === AppMode.Pro ? 'bg-purple-600 hover:bg-purple-500 border-purple-400/30' : 'bg-blue-600 hover:bg-blue-500 border-blue-400/30'
-                }`}
-              >
-                <i className="fas fa-bolt-lightning text-lg"></i>
+                <i className="fas fa-paper-plane text-2xl"></i>
               </button>
             </div>
-          </form>
-        </div>
-        <div className="flex justify-between items-center mt-4 px-4">
-          <p className="text-[10px] text-gray-600 font-mono tracking-widest uppercase">
-            unbound_engineering_engine {appMode === AppMode.Pro ? 'v3.2.0_PRO' : 'v3.0.1'}
-          </p>
-          <p className="text-[10px] text-red-500/60 font-mono tracking-widest uppercase flex items-center gap-2">
-            <i className="fas fa-triangle-exclamation"></i> adult_content_filter: enforced
-          </p>
+          </div>
         </div>
       </div>
     </div>
